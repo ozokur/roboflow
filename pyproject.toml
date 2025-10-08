@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "roboflow-uploader"
+version = "1.0.0"
+description = "macOS one-click GUI uploader for Roboflow datasets and external models"
+authors = [{name = "Roboflow Uploader Team"}]
+requires-python = ">=3.10"
+dependencies = [
+    "PySide6>=6.6",
+    "requests>=2.31",
+    "python-dotenv>=1.0",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+cli = ["typer>=0.9"]
+
+[tool.setuptools]
+packages = ["app", "app.core", "app.ui", "app.ui.widgets"]
+include-package-data = true
