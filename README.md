@@ -11,8 +11,7 @@ PySide6 tabanlı bu uygulama, Roboflow workspace → project → version hiyerar
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/<your-user>/<your-repo>/main/scripts/bootstrap_macos.sh)"
 ```
 
-Yukarıdaki komut Homebrew, Python 3.11 ve sanal ortamı hazırlar, bağımlılıkları kurar ve GUI'yi başlatır. Kurulum tamamlandıktan
-sonra macOS'ta Finder üzerinden çift tıklayarak çalıştırmak için `scripts/macos-launcher.command` dosyasını kullanabilirsiniz.
+Yukarıdaki komut Homebrew, Python 3.11 ve sanal ortamı hazırlar, bağımlılıkları kurar ve GUI'yi başlatır.
 
 ## Yerel geliştirme
 
