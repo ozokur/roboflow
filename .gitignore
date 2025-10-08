@@ -1,0 +1,21 @@
+# Virtual environments
+.venv/
+
+# Python artifacts
+__pycache__/
+*.pyc
+
+# Environment files
+.env
+.env.local
+
+# Logs and outputs
+logs/
+!logs/.gitkeep
+outputs/
+!outputs/.gitkeep
+!outputs/manifests/.gitkeep
+!outputs/artifacts/.gitkeep
+
+# macOS metadata
+.DS_Store
