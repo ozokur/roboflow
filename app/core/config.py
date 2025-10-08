@@ -28,6 +28,10 @@ def load_config() -> AppConfig:
     """Load configuration from environment variables and defaults."""
 
     base_dir = Path(__file__).resolve().parents[1]
+    repo_root = base_dir.parent
+
+    # Load environment variables in priority order: repo root first, app-specific
+    load_dotenv(repo_root / ".env", override=False)
     load_dotenv(base_dir / ".env", override=False)
 
     api_key = os.getenv("ROBOFLOW_API_KEY")

@@ -3,7 +3,16 @@
 PySide6 tabanlı bu uygulama, Roboflow workspace → project → version hiyerarşisini listeler ve iki farklı modda yükleme/ilişkilendirme işlemleri sunar:
 
 - **A Modu (Dataset Upload):** Yerel bir dataset arşivini (.zip) Roboflow projesine yeni versiyon olarak yükler ve opsiyonel olarak training tetikler.
-- **B Modu (Dış Model Artefaktı):** Yerel model dosyasını (.pt/.onnx/.engine/…) güvenli depoya (varsayılan: `outputs/artifacts/`) kopyalar ve seçili versiyona checksum ile birlikte metadata/not ekler.
+- **B Modu (Dış Model Artefaktı):** Yerel model dosyasını (.pt/.onnx/.engine/…) güvenli depoya (varsayılan: `outputs/artifacts/`) kopyalar ve Roboflow'a deploy eder.
+
+## ⚠️ Önemli: Model Upload Sınırlamaları
+
+**SDK Versiyon Uyumsuzluğu**: Roboflow SDK `ultralytics==8.0.196` gerektirir ancak yeni model formatları (YOLOv11, C3k2 modülü) ve PyTorch 2.8+ ile uyumsuzluk vardır.
+
+**Önerilen Workflow**:
+- ✅ **Roboflow Web UI'dan train**: En güvenilir yöntem ([Kılavuz: WEB_UPLOAD_GUIDE.md](WEB_UPLOAD_GUIDE.md))
+- ✅ **Local Inference**: `inference_model.py` ile kendi modelinizi kullanın ([Kılavuz: INFERENCE_GUIDE.md](INFERENCE_GUIDE.md))
+- ⚠️ **SDK Deploy**: YOLOv8 modelleri için çalışır, YOLOv11 için sorunlu ([Kılavuz: DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md))
 
 ## Tek satır kurulum (macOS)
 

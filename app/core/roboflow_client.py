@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -40,19 +41,31 @@ class RoboflowClient:
             return []
         response = self._request("GET", "/")
         data = response.json()
-        workspaces_raw = data.get("workspaces", [])
-        if isinstance(workspaces_raw, dict):
-            workspaces = []
-            for slug, info in workspaces_raw.items():
-                if isinstance(info, dict):
-                    merged = {"slug": slug}
-                    merged.update(info)
-                    merged.setdefault("id", slug)
-                else:
-                    merged = {"slug": slug, "id": slug, "name": str(info)}
-                workspaces.append(merged)
+        
+        # Roboflow API returns a single workspace field, not a list
+        workspace_slug = data.get("workspace")
+        if workspace_slug:
+            workspaces = [{
+                "id": workspace_slug,
+                "slug": workspace_slug,
+                "name": workspace_slug
+            }]
         else:
-            workspaces = list(workspaces_raw)
+            # Fallback: try workspaces list if API changes
+            workspaces_raw = data.get("workspaces", [])
+            if isinstance(workspaces_raw, dict):
+                workspaces = []
+                for slug, info in workspaces_raw.items():
+                    if isinstance(info, dict):
+                        merged = {"slug": slug}
+                        merged.update(info)
+                        merged.setdefault("id", slug)
+                    else:
+                        merged = {"slug": slug, "id": slug, "name": str(info)}
+                    workspaces.append(merged)
+            else:
+                workspaces = list(workspaces_raw)
+        
         log_event(logger, "rf_list_workspaces", count=len(workspaces))
         return workspaces
 
@@ -62,7 +75,16 @@ class RoboflowClient:
         if not self.api_key:
             return []
         response = self._request("GET", f"/{workspace}")
-        projects_raw = response.json().get("projects", [])
+        data = response.json()
+        
+        # Roboflow API returns projects inside workspace object
+        workspace_data = data.get("workspace", {})
+        projects_raw = workspace_data.get("projects", [])
+        
+        # Also check top-level for backwards compatibility
+        if not projects_raw:
+            projects_raw = data.get("projects", [])
+        
         if isinstance(projects_raw, dict):
             projects = []
             for slug, info in projects_raw.items():
@@ -84,7 +106,9 @@ class RoboflowClient:
         if not self.api_key:
             return []
         response = self._request("GET", f"/{workspace}/{project}")
-        versions_raw = response.json().get("versions", [])
+        data = response.json()
+        versions_raw = data.get("versions", [])
+        
         if isinstance(versions_raw, dict):
             versions = []
             for version_id, info in versions_raw.items():
@@ -99,7 +123,17 @@ class RoboflowClient:
                     }
                 versions.append(merged)
         else:
-            versions = list(versions_raw)
+            # API returns list of version objects
+            versions = []
+            for v in versions_raw:
+                if isinstance(v, dict):
+                    # Extract version number from ID (e.g., "ozokur/project/11" -> "11")
+                    version_id = v.get("id", "")
+                    version_number = version_id.split("/")[-1] if "/" in version_id else version_id
+                    # Use name for display, version number for reference
+                    v.setdefault("version", version_number)
+                    versions.append(v)
+        
         log_event(
             logger,
             "rf_list_versions",
@@ -165,6 +199,69 @@ class RoboflowClient:
         """Trigger a training job for a given dataset version."""
 
         raise NotImplementedError("Training trigger is not implemented in this template")
+    
+    def deploy_model(
+        self,
+        workspace: str,
+        project: str,
+        version: str,
+        model_path: str,
+        model_type: str = "yolov8"
+    ) -> Dict[str, Any]:
+        """Deploy a trained model to Roboflow using the SDK.
+        
+        Args:
+            workspace: Workspace name
+            project: Project name
+            version: Version number
+            model_path: Path to the model file
+            model_type: Type of model (yolov8, yolov5, etc.)
+        """
+        try:
+            from roboflow import Roboflow
+            import sys
+            from io import StringIO
+            
+            rf = Roboflow(api_key=self.api_key)
+            ws = rf.workspace(workspace)
+            proj = ws.project(project)
+            ver = proj.version(int(version))
+            
+            # Mock stdin to automatically answer 'y' for any prompts
+            old_stdin = sys.stdin
+            sys.stdin = StringIO('y\n')
+            
+            try:
+                # Deploy the model
+                # Roboflow SDK expects model_path to be a directory and filename to be relative path
+                model_file = Path(model_path)
+                ver.deploy(
+                    model_type=model_type,
+                    model_path=str(model_file.parent),  # Directory containing the model
+                    filename=model_file.name  # Just the filename
+                )
+            finally:
+                # Restore stdin
+                sys.stdin = old_stdin
+            
+            log_event(
+                logger,
+                "rf_model_deployed",
+                workspace=workspace,
+                project=project,
+                version=version,
+                model_type=model_type
+            )
+            
+            return {
+                "status": "deployed",
+                "workspace": workspace,
+                "project": project,
+                "version": version,
+                "model_path": model_path
+            }
+        except Exception as e:
+            raise RoboflowAPIError(500, f"Model deployment failed: {str(e)}")
 
     # ------------------------------------------------------------------
     # Internal helpers

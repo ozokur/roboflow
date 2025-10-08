@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Dict, Optional
 
 from PySide6.QtCore import QRunnable, Qt, QThreadPool, Signal, QObject
 from PySide6.QtWidgets import (
@@ -122,6 +122,18 @@ class MainWindow(QMainWindow):
         self.mode_external.stateChanged.connect(self._ensure_single_mode)
         mode_layout.addRow(self.mode_dataset)
         mode_layout.addRow(self.mode_external)
+        
+        self.version_strategy_group = QGroupBox("Version Stratejisi")
+        version_strategy_layout = QFormLayout()
+        
+        self.use_existing_version = QCheckBox("Mevcut versiyona deploy et (risky)")
+        self.use_untrained_version = QCheckBox("Train edilmemiş versiyona deploy et")
+        self.use_untrained_version.setChecked(True)
+        
+        version_strategy_layout.addRow(self.use_existing_version)
+        version_strategy_layout.addRow(self.use_untrained_version)
+        self.version_strategy_group.setLayout(version_strategy_layout)
+        mode_layout.addRow(self.version_strategy_group)
 
         self.dataset_description = QLineEdit()
         self.dataset_description.setPlaceholderText("Dataset açıklaması (opsiyonel)")
@@ -229,7 +241,13 @@ class MainWindow(QMainWindow):
                 continue
             hierarchy[workspace_slug] = {}
             for project in self.client.list_projects(workspace_slug):
-                project_slug = project.get("name") or project.get("slug") or project.get("id")
+                # Extract project slug from full ID (e.g., "ozokur/a-xauau" -> "a-xauau")
+                project_id = project.get("id", "")
+                if "/" in project_id:
+                    project_slug = project_id.split("/", 1)[1]  # Take part after first /
+                else:
+                    project_slug = project.get("slug") or project.get("name") or project_id
+                
                 if not project_slug:
                     continue
                 versions = self.client.list_versions(workspace_slug, project_slug)
@@ -279,13 +297,51 @@ class MainWindow(QMainWindow):
             return
 
         if self.mode_external.isChecked():
-            if not self.selected_version:
+            # Determine target version based on strategy
+            target_version = None
+            
+            if self.use_untrained_version.isChecked():
+                # Find a version without a trained model
+                try:
+                    versions = self.client.list_versions(
+                        self.selected_workspace,
+                        self.selected_project
+                    )
+                    if versions:
+                        # Sort by version number (highest first)
+                        sorted_versions = sorted(
+                            versions, 
+                            key=lambda v: int(v.get('version', 0)),
+                            reverse=True
+                        )
+                        
+                        # Look for a version without trained model
+                        # Roboflow API doesn't always provide this info, so we'll try the latest
+                        target_version = str(sorted_versions[0].get('version'))
+                        
+                        self.statusBar().showMessage(
+                            f"Seçilen versiyon: {target_version} (Eğer hata alırsanız, yeni dataset version oluşturun)"
+                        )
+                except Exception as e:
+                    QMessageBox.warning(
+                        self,
+                        "Versiyon Bulunamadı",
+                        f"Uygun versiyon bulunamadı: {e}\n\n"
+                        "Lütfen Roboflow'da yeni bir dataset version oluşturun."
+                    )
+                    return
+            else:
+                # Use manually selected version
+                target_version = self.selected_version
+            
+            if not target_version:
                 QMessageBox.warning(
                     self,
-                    "Versiyon yok",
-                    "B Modu için hedef versiyon seçmelisiniz.",
+                    "Versiyon Seçilmedi",
+                    "Lütfen bir versiyon seçin veya otomatik seçimi aktif edin.",
                 )
                 return
+                
             if not self.selected_file or not validate_model_extension(self.selected_file):
                 QMessageBox.warning(
                     self,
@@ -297,7 +353,7 @@ class MainWindow(QMainWindow):
                 self.uploader.link_external_model,
                 workspace=self.selected_workspace,
                 project=self.selected_project,
-                version=self.selected_version,
+                version=target_version,
                 file_path=self.selected_file,
                 storage_note=self.storage_note_input.text() or None,
             )
@@ -325,18 +381,96 @@ class MainWindow(QMainWindow):
     def _handle_execution_success(self, result: Any) -> None:
         self.progress.hide()
         self.statusBar().showMessage("İşlem tamamlandı")
-        self.result_view.setPlainText(str(result))
+        
+        # Format result in a user-friendly way
+        if isinstance(result, dict):
+            formatted_result = self._format_result(result)
+        else:
+            formatted_result = str(result)
+        
+        self.result_view.setPlainText(formatted_result)
         log_event(self.logger, "ui_operation_completed", result=str(result))
 
     def _handle_execution_error(self, error: Exception) -> None:
         self.progress.hide()
         self.statusBar().showMessage("İşlem başarısız")
-        if isinstance(error, RoboflowAPIError):
-            QMessageBox.critical(self, "Roboflow API hatası", str(error))
+        
+        error_msg = str(error)
+        
+        # Check for specific error patterns
+        if "already has a trained model" in error_msg:
+            QMessageBox.critical(
+                self, 
+                "Version Zaten Trained Model İçeriyor", 
+                "Bu version'da zaten Roboflow'da train edilmiş bir model var.\n\n"
+                "🔧 Çözüm Seçenekleri:\n"
+                "1. Roboflow'da yeni bir dataset version oluşturun\n"
+                "2. Train edilmemiş başka bir version seçin\n"
+                "3. Mevcut trained modeli silin (Roboflow web UI'dan)\n\n"
+                f"Detay: {error_msg}"
+            )
+        elif "C3k2" in error_msg or "Weights only load failed" in error_msg:
+            QMessageBox.critical(
+                self,
+                "Model Versiyon Uyumsuzluğu",
+                "Model dosyası SDK ile uyumlu değil.\n\n"
+                "🔧 Çözüm:\n"
+                "• Roboflow Web UI'dan model train edin\n"
+                "• VEYA local inference için inference_model.py kullanın\n"
+                "• Detaylı kılavuz: WEB_UPLOAD_GUIDE.md\n\n"
+                f"Teknik detay: {error_msg[:200]}..."
+            )
+        elif isinstance(error, RoboflowAPIError):
+            QMessageBox.critical(self, "Roboflow API Hatası", error_msg)
         else:
-            QMessageBox.critical(self, "Hata", str(error))
-        log_event(self.logger, "ui_operation_failed", error=str(error))
+            QMessageBox.critical(self, "Hata", error_msg)
+            
+        log_event(self.logger, "ui_operation_failed", error=error_msg)
 
+    # ------------------------------------------------------------------
+    # Result formatting
+    # ------------------------------------------------------------------
+    def _format_result(self, result: Dict[str, Any]) -> str:
+        """Format operation result in a user-friendly way."""
+        lines = []
+        
+        # Operation info
+        op_id = result.get("operation_id", "N/A")
+        lines.append(f"✅ İşlem Başarılı!")
+        lines.append(f"─" * 60)
+        lines.append(f"İşlem ID: {op_id}")
+        
+        # Artifact info
+        artifact = result.get("artifact", {})
+        if artifact:
+            lines.append(f"\n📦 Model Bilgileri:")
+            lines.append(f"   • Dosya: {artifact.get('filename', 'N/A')}")
+            lines.append(f"   • Boyut: {artifact.get('size_bytes', 0) / (1024*1024):.2f} MB")
+            lines.append(f"   • SHA256: {artifact.get('sha256', 'N/A')[:16]}...")
+            lines.append(f"   • Konum: {artifact.get('storage_url', 'N/A')}")
+        
+        # Manifest info
+        manifest = result.get("manifest")
+        if manifest:
+            lines.append(f"\n📄 Manifest: {manifest}")
+        
+        # Deployment status
+        api_resp = result.get("api_response", {})
+        if isinstance(api_resp, dict):
+            if api_resp.get("status") == "deployed":
+                lines.append(f"\n🚀 Roboflow'a yüklendi!")
+                lines.append(f"   Workspace: {api_resp.get('workspace')}")
+                lines.append(f"   Project: {api_resp.get('project')}")
+                lines.append(f"   Version: {api_resp.get('version')}")
+            elif "error" in api_resp:
+                lines.append(f"\n⚠️  Roboflow'a yüklenemedi (local'de saklandı)")
+                lines.append(f"   Hata: {api_resp.get('error', 'Unknown')}")
+        
+        lines.append(f"\n{'─' * 60}")
+        lines.append(f"🎉 Model başarıyla işlendi!")
+        
+        return "\n".join(lines)
+    
     # ------------------------------------------------------------------
     # Worker helper
     # ------------------------------------------------------------------
