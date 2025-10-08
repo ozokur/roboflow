@@ -40,7 +40,19 @@ class RoboflowClient:
             return []
         response = self._request("GET", "/")
         data = response.json()
-        workspaces = data.get("workspaces", [])
+        workspaces_raw = data.get("workspaces", [])
+        if isinstance(workspaces_raw, dict):
+            workspaces = []
+            for slug, info in workspaces_raw.items():
+                if isinstance(info, dict):
+                    merged = {"slug": slug}
+                    merged.update(info)
+                    merged.setdefault("id", slug)
+                else:
+                    merged = {"slug": slug, "id": slug, "name": str(info)}
+                workspaces.append(merged)
+        else:
+            workspaces = list(workspaces_raw)
         log_event(logger, "rf_list_workspaces", count=len(workspaces))
         return workspaces
 
@@ -50,7 +62,19 @@ class RoboflowClient:
         if not self.api_key:
             return []
         response = self._request("GET", f"/{workspace}")
-        projects = response.json().get("projects", [])
+        projects_raw = response.json().get("projects", [])
+        if isinstance(projects_raw, dict):
+            projects = []
+            for slug, info in projects_raw.items():
+                if isinstance(info, dict):
+                    merged = {"slug": slug}
+                    merged.update(info)
+                    merged.setdefault("id", slug)
+                else:
+                    merged = {"slug": slug, "id": slug, "name": str(info)}
+                projects.append(merged)
+        else:
+            projects = list(projects_raw)
         log_event(logger, "rf_list_projects", workspace=workspace, count=len(projects))
         return projects
 
@@ -60,7 +84,22 @@ class RoboflowClient:
         if not self.api_key:
             return []
         response = self._request("GET", f"/{workspace}/{project}")
-        versions = response.json().get("versions", [])
+        versions_raw = response.json().get("versions", [])
+        if isinstance(versions_raw, dict):
+            versions = []
+            for version_id, info in versions_raw.items():
+                if isinstance(info, dict):
+                    merged = {"id": version_id, "version": version_id}
+                    merged.update(info)
+                else:
+                    merged = {
+                        "id": version_id,
+                        "version": version_id,
+                        "name": str(info),
+                    }
+                versions.append(merged)
+        else:
+            versions = list(versions_raw)
         log_event(
             logger,
             "rf_list_versions",
