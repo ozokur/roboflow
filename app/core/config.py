@@ -8,8 +8,9 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"  # Updated: Model deployment with version tracking
 APP_NAME = "Roboflow Uploader"
+APP_BUILD_DATE = "2025-10-08"
 
 
 @dataclass
