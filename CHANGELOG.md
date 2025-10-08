@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.1] - 2025-10-08
+
+### Fixed
+- 🐛 **Critical**: YOLOv11 detection now works correctly via C3k2 error analysis
+- 🛡️ Added pre-deployment compatibility check with user confirmation
+- ⚠️ Smart warning dialog for incompatible models before upload attempt
+
+### Changed
+- 🔍 Improved fallback detection: C3k2 error → YOLOv11, not YOLOv8
+- 🎯 User can now choose to proceed or cancel when incompatible model detected
+
+## [1.2.0] - 2025-10-08
+
+### Added
+- 🔍 **Auto Model Detection**: Automatically detect YOLO model version (v5, v8, v11)
+- 🎯 **Smart Deployment**: Use detected model architecture for deployment
+- ⚡ **Real-time Compatibility Check**: Show compatibility warnings before upload
+- 📊 **Model Info Display**: Visual feedback showing detected model type and version
+- 📝 **Enhanced Logging**: Log model detection events for audit trail
+
+### Changed
+- 🔄 Updated app version display to v1.2.0
+- 🎨 Enhanced file selection UI with model info panel
+- 🔧 Improved deployment with automatic model type detection
+
+### Technical Details
+- New `model_detector.py` module for YOLO version detection
+- Detects YOLOv5 (C3), YOLOv8 (C2f), YOLOv11 (C3k2, C2PSA)
+- Shows green badge for compatible models (YOLOv8)
+- Shows orange badge for incompatible models (YOLOv11)
+- Fallback to filename-based detection if torch load fails
+
 ## [1.1.0] - 2025-10-08
 
 ### Added
@@ -55,6 +87,8 @@ All notable changes to this project will be documented in this file.
 
 | Version | Date | Key Features |
 |---------|------|--------------|
+| 1.2.1 | 2025-10-08 | Fixed YOLOv11 detection, pre-deployment checks |
+| 1.2.0 | 2025-10-08 | Auto model detection, smart deployment |
 | 1.1.0 | 2025-10-08 | Model deployment, smart versioning, inference |
 | 1.0.0 | 2025-10-08 | Initial release, basic upload |
 

@@ -8,9 +8,27 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
-APP_VERSION = "1.1.0"  # Updated: Model deployment with version tracking
+APP_VERSION = "1.2.1"  # Updated: Fixed YOLOv11 detection (C3k2 error analysis)
 APP_NAME = "Roboflow Uploader"
 APP_BUILD_DATE = "2025-10-08"
+
+
+def increment_version(version_type: str = "patch") -> str:
+    """Increment app version (for auto-update feature)."""
+    parts = APP_VERSION.split(".")
+    major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
+    
+    if version_type == "major":
+        major += 1
+        minor = 0
+        patch = 0
+    elif version_type == "minor":
+        minor += 1
+        patch = 0
+    else:  # patch
+        patch += 1
+    
+    return f"{major}.{minor}.{patch}"
 
 
 @dataclass

@@ -26,8 +26,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.core.config import APP_NAME, load_config, mask_secret
+from app.core.config import APP_NAME, APP_VERSION, APP_BUILD_DATE, load_config, mask_secret
 from app.core.logging_util import log_event, setup_logging
+from app.core.model_detector import detect_model_info, check_compatibility
 from app.core.roboflow_client import RoboflowAPIError, RoboflowClient
 from app.core.uploader import UploadManager, validate_model_extension
 
@@ -90,27 +91,57 @@ class MainWindow(QMainWindow):
         container = QWidget()
         layout = QVBoxLayout(container)
 
+        # Header with version info
+        header_layout = QHBoxLayout()
         api_key_label = QLabel(
             f"API Key: {mask_secret(self.config.api_key)} — Env: {self.config.app_env}"
         )
-        layout.addWidget(api_key_label)
+        version_label = QLabel(
+            f"v{APP_VERSION} (Build: {APP_BUILD_DATE})"
+        )
+        version_label.setStyleSheet("color: gray; font-size: 11px;")
+        header_layout.addWidget(api_key_label)
+        header_layout.addStretch()
+        header_layout.addWidget(version_label)
+        layout.addLayout(header_layout)
 
-        refresh_button = QPushButton("Workspace/Project/Version listesini yenile")
+        # Action buttons row
+        action_buttons_layout = QHBoxLayout()
+        refresh_button = QPushButton("🔄 Workspace/Project/Version listesini yenile")
         refresh_button.clicked.connect(self.refresh_hierarchy)
-        layout.addWidget(refresh_button)
+        
+        view_logs_button = QPushButton("📊 İşlem Geçmişini Görüntüle")
+        view_logs_button.clicked.connect(self._view_operation_history)
+        
+        action_buttons_layout.addWidget(refresh_button)
+        action_buttons_layout.addWidget(view_logs_button)
+        layout.addLayout(action_buttons_layout)
 
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["Ad", "Tip", "Ek Bilgi"])
         self.tree.itemSelectionChanged.connect(self._on_selection_changed)
         layout.addWidget(self.tree)
 
+        file_group = QGroupBox("Dosya Seçimi")
+        file_layout = QVBoxLayout()
+        
         file_row = QHBoxLayout()
         self.file_label = QLabel("Hiçbir dosya seçilmedi")
         select_button = QPushButton("Model/Dataset Dosyası Seç")
         select_button.clicked.connect(self.pick_file)
         file_row.addWidget(self.file_label)
         file_row.addWidget(select_button)
-        layout.addLayout(file_row)
+        file_layout.addLayout(file_row)
+        
+        # Model info display
+        self.model_info_label = QLabel("")
+        self.model_info_label.setStyleSheet("color: blue; font-size: 11px; padding: 5px;")
+        self.model_info_label.setWordWrap(True)
+        self.model_info_label.hide()
+        file_layout.addWidget(self.model_info_label)
+        
+        file_group.setLayout(file_layout)
+        layout.addWidget(file_group)
 
         # Mode selection
         self.mode_group = QGroupBox("Çalışma Modu")
@@ -215,6 +246,43 @@ class MainWindow(QMainWindow):
             return
         self.selected_file = Path(file_path)
         self.file_label.setText(self.selected_file.name)
+        
+        # Auto-detect model info if it's a .pt file
+        if self.selected_file.suffix.lower() == '.pt':
+            try:
+                model_info = detect_model_info(self.selected_file)
+                is_compatible, message = check_compatibility(model_info)
+                
+                # Display model info
+                info_text = f"🔍 Tespit Edilen: {model_info.display_name}\n"
+                if is_compatible:
+                    info_text += "✅ Roboflow SDK ile uyumlu"
+                    self.model_info_label.setStyleSheet("color: green; font-size: 11px; padding: 5px; background-color: #e8f5e9;")
+                else:
+                    info_text += f"⚠️ SDK ile uyumlu değil\n"
+                    info_text += f"Ultralytics gereksinimi: {model_info.compatible_ultralytics}"
+                    self.model_info_label.setStyleSheet("color: orange; font-size: 11px; padding: 5px; background-color: #fff3e0;")
+                
+                self.model_info_label.setText(info_text)
+                self.model_info_label.show()
+                
+                # Log the detection
+                log_event(
+                    self.logger,
+                    "model_detected",
+                    filename=self.selected_file.name,
+                    model_type=model_info.model_type,
+                    version=model_info.version,
+                    architecture=model_info.architecture,
+                    compatible=is_compatible
+                )
+                
+            except Exception as e:
+                self.model_info_label.setText(f"ℹ️ Model bilgisi tespit edilemedi: {str(e)[:50]}...")
+                self.model_info_label.setStyleSheet("color: gray; font-size: 11px; padding: 5px;")
+                self.model_info_label.show()
+        else:
+            self.model_info_label.hide()
 
     # ------------------------------------------------------------------
     # Data loading
@@ -349,6 +417,68 @@ class MainWindow(QMainWindow):
                     "Lütfen .pt/.onnx/.engine/.tflite/.pb uzantılı bir model dosyası seçin.",
                 )
                 return
+            
+            # Check model compatibility before deployment
+            if self.selected_file.suffix.lower() == '.pt':
+                try:
+                    model_info = detect_model_info(self.selected_file)
+                    is_compatible, message = check_compatibility(model_info)
+                    
+                    if not is_compatible:
+                        # YOLOv11 is actually supported by Roboflow, but needs different ultralytics version
+                        if model_info.version == "v11":
+                            reply = QMessageBox.warning(
+                                self,
+                                "YOLOv11 İçin Ultralytics Güncelleme Gerekli",
+                                f"✅ YOLOv11 Roboflow tarafından destekleniyor!\n\n"
+                                f"Ancak ultralytics versiyonu güncellenmeli:\n"
+                                f"• Mevcut: 8.0.196\n"
+                                f"• Gerekli: <=8.3.40\n\n"
+                                f"🔧 Hızlı Çözüm:\n"
+                                f"Terminal'de şu komutu çalıştırın:\n"
+                                f"  bash setup_yolov11.sh\n\n"
+                                f"🚀 Alternatif: Local Inference\n"
+                                f"  python inference_model.py --source image.jpg --model {model_info.file_path.name}\n\n"
+                                f"Şimdi setup scriptini çalıştırmak ister misiniz?",
+                                QMessageBox.Yes | QMessageBox.No,
+                                QMessageBox.Yes
+                            )
+                            
+                            if reply == QMessageBox.Yes:
+                                QMessageBox.information(
+                                    self,
+                                    "Terminal'e Geçin",
+                                    "Lütfen terminal'e gidin ve şu komutu çalıştırın:\n\n"
+                                    "bash setup_yolov11.sh\n\n"
+                                    "Kurulum tamamlandıktan sonra uygulamayı yeniden başlatın."
+                                )
+                            self.statusBar().showMessage("YOLOv11 için ultralytics güncelleme gerekli")
+                            return
+                        else:
+                            reply = QMessageBox.warning(
+                                self,
+                                "Model Uyumsuzluğu Tespit Edildi",
+                                f"⚠️ {model_info.display_name} şu anki kurulumla uyumlu değil!\n\n"
+                                f"Ultralytics gereksinimi: {model_info.compatible_ultralytics}\n"
+                                f"Mevcut versiyon: 8.0.196\n\n"
+                                f"🔧 Önerilen Çözümler:\n"
+                                f"1. Local Inference kullanın (inference_model.py)\n"
+                                f"2. Roboflow Web UI'dan model train edin\n"
+                                f"3. YOLOv8 formatında model kullanın\n\n"
+                                f"Yine de devam etmek istiyor musunuz?\n"
+                                f"(Başarısız olma ihtimali yüksek)",
+                                QMessageBox.Yes | QMessageBox.No,
+                                QMessageBox.No
+                            )
+                            
+                            if reply == QMessageBox.No:
+                                self.statusBar().showMessage("İşlem iptal edildi")
+                                return
+                        
+                except Exception as e:
+                    # If detection fails, continue anyway
+                    pass
+            
             worker = FunctionWorker(
                 self.uploader.link_external_model,
                 workspace=self.selected_workspace,
@@ -470,6 +600,93 @@ class MainWindow(QMainWindow):
         lines.append(f"🎉 Model başarıyla işlendi!")
         
         return "\n".join(lines)
+    
+    # ------------------------------------------------------------------
+    # Operation History Viewer
+    # ------------------------------------------------------------------
+    def _view_operation_history(self) -> None:
+        """Show operation history in a dialog."""
+        import json
+        from pathlib import Path
+        from datetime import datetime
+        
+        manifests_dir = self.config.manifests_dir
+        if not manifests_dir.exists():
+            QMessageBox.information(
+                self,
+                "İşlem Geçmişi",
+                "Henüz hiç işlem yapılmamış."
+            )
+            return
+        
+        # Load manifests
+        manifests = []
+        for manifest_file in sorted(manifests_dir.glob("*.json"), reverse=True):
+            try:
+                with open(manifest_file) as f:
+                    data = json.load(f)
+                    manifests.append(data)
+            except Exception:
+                pass
+        
+        if not manifests:
+            QMessageBox.information(
+                self,
+                "İşlem Geçmişi",
+                "Henüz hiç işlem yapılmamış."
+            )
+            return
+        
+        # Build history text
+        history_text = []
+        history_text.append(f"📊 İşlem Geçmişi ({len(manifests)} işlem)\n")
+        history_text.append("=" * 70 + "\n\n")
+        
+        for manifest in manifests[:20]:  # Show latest 20
+            op_id = manifest.get('op_id', 'N/A')
+            mode = manifest.get('mode', 'N/A')
+            status = manifest.get('status', 'N/A')
+            written_at = manifest.get('written_at', 'N/A')
+            workspace = manifest.get('workspace', 'N/A')
+            project = manifest.get('project', 'N/A')
+            version = manifest.get('target_version', 'N/A')
+            
+            status_icon = "✅" if status == "success" else "⚠️" if status == "partial_success" else "❌"
+            
+            # Format timestamp
+            try:
+                dt = datetime.fromisoformat(written_at.replace('Z', '+00:00'))
+                ts_formatted = dt.strftime("%Y-%m-%d %H:%M:%S")
+            except:
+                ts_formatted = written_at
+            
+            history_text.append(f"{status_icon} [{ts_formatted}] {op_id}\n")
+            history_text.append(f"   Mode: {mode}\n")
+            history_text.append(f"   Target: {workspace}/{project}/v{version}\n")
+            history_text.append(f"   Status: {status}\n")
+            
+            if 'artifact' in manifest:
+                artifact = manifest['artifact']
+                size_mb = artifact.get('size_bytes', 0) / 1024 / 1024
+                history_text.append(f"   File: {artifact.get('filename', 'N/A')} ({size_mb:.2f} MB)\n")
+            
+            if 'api_response' in manifest:
+                api_resp = manifest['api_response']
+                if isinstance(api_resp, dict):
+                    if api_resp.get('status') == 'deployed':
+                        history_text.append(f"   🚀 Roboflow'a deploy edildi!\n")
+                    elif 'error' in api_resp:
+                        error = api_resp.get('error', 'Unknown')[:80]
+                        history_text.append(f"   ⚠️ Error: {error}...\n")
+            
+            history_text.append("\n")
+        
+        # Show in dialog
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("İşlem Geçmişi")
+        dialog.setText("".join(history_text))
+        dialog.setIcon(QMessageBox.Information)
+        dialog.exec()
     
     # ------------------------------------------------------------------
     # Worker helper

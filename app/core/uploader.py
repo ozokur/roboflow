@@ -83,13 +83,36 @@ class UploadManager:
         )
 
         # Deploy model to Roboflow
+        # Try to detect model type
+        from .model_detector import detect_model_info
+        
+        try:
+            model_info = detect_model_info(file_path)
+            model_type = model_info.architecture  # e.g., "yolov8n", "yolo11n"
+            log_event(
+                self.logger,
+                "model_info_detected",
+                operation_id=operation_id,
+                model_type=model_type,
+                version=model_info.version,
+                compatible=model_info.is_compatible_with_sdk
+            )
+        except Exception as e:
+            model_type = "yolov8"  # Fallback
+            log_event(
+                self.logger,
+                "model_info_detection_failed",
+                operation_id=operation_id,
+                error=str(e)
+            )
+        
         try:
             response = self.client.deploy_model(
                 workspace=workspace,
                 project=project,
                 version=version,
                 model_path=str(file_path),
-                model_type="yolov8"  # Default, could be made configurable
+                model_type=model_type
             )
             api_response = response
             status = "success"
