@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
-from .config import APP_NAME, APP_VERSION
+from .config import APP_NAME, APP_VERSION, APP_BUILD_DATE
 
 APP_LOGGER_NAME = "roboflow_uploader"
 
@@ -37,9 +37,15 @@ class JsonlEventHandler(logging.Handler):
 def setup_logging(logs_dir: Path) -> logging.Logger:
     """Configure the application logger and structured event sink."""
 
-    app_log = logs_dir / "app.log"
-    events_log = logs_dir / "events.jsonl"
+    # Create date-based log files for better organization
+    today = datetime.now().strftime("%Y-%m-%d")
+    app_log = logs_dir / f"app-{today}.log"
+    events_log = logs_dir / f"events-{today}.jsonl"
     app_log.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Also keep a symlink to latest
+    latest_app = logs_dir / "app.log"
+    latest_events = logs_dir / "events.jsonl"
 
     logger = logging.getLogger(APP_LOGGER_NAME)
     logger.setLevel(logging.INFO)
@@ -52,12 +58,31 @@ def setup_logging(logs_dir: Path) -> logging.Logger:
         )
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
+        
+        # Create symlink to latest log
+        try:
+            if latest_app.exists() or latest_app.is_symlink():
+                latest_app.unlink()
+            latest_app.symlink_to(app_log.name)
+        except Exception:
+            pass  # Symlink not critical
 
     if not any(isinstance(h, JsonlEventHandler) for h in logger.handlers):
         json_handler = JsonlEventHandler(events_log)
         logger.addHandler(json_handler)
+        
+        # Create symlink to latest events
+        try:
+            if latest_events.exists() or latest_events.is_symlink():
+                latest_events.unlink()
+            latest_events.symlink_to(events_log.name)
+        except Exception:
+            pass  # Symlink not critical
 
-    logger.info("%s v%s logger initialized", APP_NAME, APP_VERSION)
+    logger.info(
+        "%s v%s (build: %s) logger initialized", 
+        APP_NAME, APP_VERSION, APP_BUILD_DATE
+    )
     return logger
 
 

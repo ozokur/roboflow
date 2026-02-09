@@ -82,35 +82,54 @@ class UploadManager:
             f"Checksum (sha256): {artifact['sha256']}"
         )
 
+        # Deploy model to Roboflow
+        # Try to detect model type
+        from .model_detector import detect_model_info
+        
         try:
-            response = self.client.append_version_note(
+            model_info = detect_model_info(file_path)
+            model_type = model_info.architecture  # e.g., "yolov8n", "yolo11n"
+            log_event(
+                self.logger,
+                "model_info_detected",
+                operation_id=operation_id,
+                model_type=model_type,
+                version=model_info.version,
+                compatible=model_info.is_compatible_with_sdk
+            )
+        except Exception as e:
+            model_type = "yolov8"  # Fallback
+            log_event(
+                self.logger,
+                "model_info_detection_failed",
+                operation_id=operation_id,
+                error=str(e)
+            )
+        
+        try:
+            response = self.client.deploy_model(
                 workspace=workspace,
                 project=project,
                 version=version,
-                note=note,
-                metadata=metadata,
+                model_path=str(file_path),
+                model_type=model_type
             )
+            api_response = response
+            status = "success"
         except RoboflowAPIError as exc:
-            manifest = self._persist_manifest(
-                operation_id,
-                {
-                    "mode": "external_model",
-                    "workspace": workspace,
-                    "project": project,
-                    "target_version": version,
-                    "artifact": artifact,
-                    "status": "error",
-                    "error": str(exc),
-                    "payload": getattr(exc, "payload", {}),
-                },
-            )
+            # If deployment fails, store locally only
+            api_response = {
+                "status": "stored_locally",
+                "error": str(exc),
+                "metadata": metadata,
+            }
+            status = "partial_success"
             log_event(
                 self.logger,
-                "external_model_link_failed",
+                "model_deployment_failed",
                 operation_id=operation_id,
-                manifest=str(manifest),
+                error=str(exc),
             )
-            raise
 
         manifest_payload = {
             "mode": "external_model",
@@ -119,8 +138,9 @@ class UploadManager:
             "target_version": version,
             "artifact": artifact,
             "storage_note": storage_note,
-            "status": "success",
-            "api_response": response,
+            "note_content": note,
+            "status": status,
+            "api_response": api_response,
         }
         manifest = self._persist_manifest(operation_id, manifest_payload)
         log_event(
@@ -133,7 +153,7 @@ class UploadManager:
             "operation_id": operation_id,
             "manifest": manifest,
             "artifact": artifact,
-            "api_response": response,
+            "api_response": api_response,
         }
 
     # ------------------------------------------------------------------

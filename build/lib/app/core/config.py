@@ -8,8 +8,27 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.2.1"  # Updated: Fixed YOLOv11 detection (C3k2 error analysis)
 APP_NAME = "Roboflow Uploader"
+APP_BUILD_DATE = "2025-10-08"
+
+
+def increment_version(version_type: str = "patch") -> str:
+    """Increment app version (for auto-update feature)."""
+    parts = APP_VERSION.split(".")
+    major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
+    
+    if version_type == "major":
+        major += 1
+        minor = 0
+        patch = 0
+    elif version_type == "minor":
+        minor += 1
+        patch = 0
+    else:  # patch
+        patch += 1
+    
+    return f"{major}.{minor}.{patch}"
 
 
 @dataclass
@@ -28,6 +47,10 @@ def load_config() -> AppConfig:
     """Load configuration from environment variables and defaults."""
 
     base_dir = Path(__file__).resolve().parents[1]
+    repo_root = base_dir.parent
+
+    # Load environment variables in priority order: repo root first, app-specific
+    load_dotenv(repo_root / ".env", override=False)
     load_dotenv(base_dir / ".env", override=False)
 
     api_key = os.getenv("ROBOFLOW_API_KEY")
